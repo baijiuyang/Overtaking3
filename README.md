@@ -3,10 +3,15 @@ Include the source code for the data structure and analysis for pedestrian overt
 Data is not shared due to privacy agreement
 
 Packages:
+
 Python 3.6.9
+
 numpy 1.16.4
+
 matplotlib 3.1.1
+
 pandas 0.25.1
+
 scipy 1.3.1
 
 
