@@ -39,8 +39,8 @@ Leader speed: 0.8, 0.9, 1.0, 1.1, 1.2, 1.3 m/s
 
 data:
 90Hz
-File name: Tomato3_subj**_trial***_[d0], [v0].csv
-Description: time series data in experimental trial
+\\File name: Tomato3_subj**_trial***_[d0], [v0].csv
+\\Description: time series data in experimental trial
 Column: leader position(x), leader position(z), leader position(y), follower position(x), follower position(z), follower position(y), follower yaw, pitch, roll, time stamp, leader model, at each frame
 Tomato3_freewalk_subj**_s[*, session num]_trial***.csv
 Description: time series data in freewalk trials
