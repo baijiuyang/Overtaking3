@@ -6,7 +6,7 @@ from matplotlib import animation
 from matplotlib import pyplot as plt
 from matplotlib import cm
 import matplotlib as mpl
-from scipy.signal import butter, lfilter
+from scipy.signal import butter, filtfilt
 from scipy.interpolate import interp1d
 
 class Trial:
@@ -36,7 +36,8 @@ class Trial:
     
     def rotate_data(self, data):
         '''
-            rotate the data so that the new y axis points from homepole to target door.
+            Rotate the data so that the new y axis points from homepole 
+            to target door.
         '''
         # unify two directions of walking
         if self.trial_id%2 == 0:
@@ -49,31 +50,37 @@ class Trial:
         xy = np.matmul(trans_data[:,0:2], R)
         return np.stack((xy[:,0], xy[:,1], trans_data[:,2]), axis=1)
    
-    def filter_data(self, data, order, cutoff, Hz):
+    def filter_data(self, data, order, cutoff):
+        '''
+            Filter the data using butterwirth low pass digital foward
+            and backward filter.
+        '''
         # interpolate and extrapolate (add pads on two sides to prevent boundary effects)
         pad = 3
         func = interp1d(self.tstamps, data, axis=0, kind='linear', fill_value='extrapolate')
-        indices = [i*1.0/Hz for i in list(range(-pad*Hz, len(data) + pad*Hz))]
+        indices = [i*1.0/self.Hz for i in list(range(-pad*self.Hz, len(data) + pad*self.Hz))]
         data = func(indices)
         # low pass filter on position
-        b, a = butter(order, cutoff/(Hz/2.0))
+        b, a = butter(order, cutoff/(self.Hz/2.0))
         data = filtfilt(b, a, data, axis=0, padtype=None) # no auto padding
         # remove pads
-        data = data[pad*Hz:-pad*Hz]
+        data = data[pad*self.Hz:-pad*self.Hz]
         return data
     
-    def get_positions(self, role, is_rotated=True, is_filtered=True, order=None, cutoff=None):
-        if order == None:
-            order = self.order
-        if cutoff == None:
-            cutoff = self.cutoff
+    def get_positions(self, role, **kwargs):
+        # load kwargs
+        order = self.order if 'order' not in kwargs else kwargs['order']
+        cutoff = self.cutoff if 'cutoff' not in kwargs else kwargs['cutoff']
+        is_rotated = True if 'is_rotated' not in kwargs else kwargs['is_rotated']
+        is_filtered = True if 'is_filtered' not in kwargs else kwargs['is_filtered']
+        
         if role == 'l':
             data = self.lpos
             if is_filtered or is_rotated:
                 data = self.rotate_data(self.lpos)
             if is_filtered:
                 pos0 = np.tile([0, 0, 0], (self.f1 - 1, 1))
-                vel = np.tile([0, self.v0/Hz, 0], (len(self.tstamps) - self.f1 + 1, 1))
+                vel = np.tile([0, self.v0/self.Hz, 0], (len(self.tstamps) - self.f1 + 1, 1))
                 pos1 = np.cumsum(vel, axis=0) + data[self.f1]
                 data = np.concatenate((pos0, pos1))
         elif role == 'f':
@@ -81,33 +88,42 @@ class Trial:
             if is_rotated:
                 data = self.rotate_data(data)
             if is_filtered:
-                data = self.filter_data(data, order, cutoff, self.Hz)
+                data = self.filter_data(data, order, cutoff)
         return data
     
-    def get_velocities(self, role, is_rotated=True, is_filtered=True, order=None, cutoff=None):        
+    def get_velocities(self, role, **kwargs):
+        pos = self.get_positions(role, **kwargs)
         if role == 'l':
-            pos = self.get_positions(role, is_rotated, is_filtered, order, cutoff)
             pos[:self.f1] = pos[self.f1]
-        else:
-            pos = self.get_positions(role, is_rotated, is_filtered, order, cutoff)
         return np.gradient(pos, axis=0)*self.Hz
     
-    def get_speeds(self, role, is_rotated=True, is_filtered=True, order=None, cutoff=None):
-        vel = self.get_velocities(role, is_rotated, is_filtered, order, cutoff)
+    def get_speeds(self, role, **kwargs):
+        vel = self.get_velocities(role, **kwargs)
         return np.linalg.norm(vel[:,0:2], axis=1)
     
-    def get_accelerations(self, role, is_rotated=True, is_filtered=True, order=None, cutoff=None):
-        vel = self.get_velocities(role, is_rotated, is_filtered, order, cutoff)
+    def get_accelerations(self, role, **kwargs):
+        vel = self.get_velocities(role, **kwargs)
         return np.gradient(vel, axis=0)*self.Hz
 
-    def plot_positions(self, accelerations=False, is_rotated=True, is_filtered=True, order=None, \
-                       cutoff=None, links=False):
+    def plot_positions(self, accelerations=False, links=False, **kwargs):
+        '''
+            Show the trajectories of follower and leader using scatter plot.
+            args:
+                accelerations: Boolean. Whether draw acceleration vectors.
+                links: Boolean. Whether draw links between the positions of 
+                       follower and leader at the same moment for a sense 
+                       of concurrency.
+        ''' 
+        # load kwargs
+        is_rotated = True if 'is_rotated' not in kwargs else kwargs['is_rotated']
+        is_filtered = True if 'is_filtered' not in kwargs else kwargs['is_filtered']
+        
         # get data
-        fpos = self.get_positions('f', is_rotated, is_filtered, order, cutoff)
-        fspd = self.get_speeds('f', is_rotated, is_filtered, order, cutoff)
-        facc = self.get_accelerations('f', is_rotated, is_filtered, order, cutoff)
-        lpos = self.get_positions('l', is_rotated, is_filtered, order, cutoff)
-        lspd = self.get_speeds('l', is_rotated, is_filtered, order, cutoff)
+        fpos = self.get_positions('f', **kwargs)
+        fspd = self.get_speeds('f', **kwargs)
+        facc = self.get_accelerations('f', **kwargs)
+        lpos = self.get_positions('l', **kwargs)
+        lspd = self.get_speeds('l', **kwargs)
         f1 = self.f1
         f2 = len(self.tstamps)
         
@@ -117,11 +133,19 @@ class Trial:
             ax = plt.axes(xlim=(-3, 3), ylim=(-1, 15))
         else:
             ax = plt.axes(xlim=(-4.5, 4.5), ylim=(-5.5, 5.5))
-            
+        plt.xlabel('position x')
+        plt.ylabel('position y')
+        filt = ', filtered data' if is_filtered else ', raw data'
+        plt.title('subject ' + str(self.subject_id) + ' trial ' + str(self.trial_id) + '\n v0 = ' + str(self.v0) + filt)
+        
         # set the aspect ratio equal to that of the actual value
         ax.set_aspect('auto')
         cmap = cm.get_cmap('plasma')
 #         cmap = cm.get_cmap('rainbow')
+        # add labels and color bar
+        norm = mpl.colors.Normalize(vmin=0.8, vmax=1.6)
+        cb = plt.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap))
+        cb.set_label('m/s')
     
         # plot leader and follower pos  
         ax.scatter(lpos[self.f1:,0], lpos[self.f1:,1], c = cmap((lspd[self.f1:]-0.8)/0.8), marker=',', s=[0.5]*len(lpos[self.f1:]))
@@ -138,28 +162,36 @@ class Trial:
                 x1, y1 = fpos[i,0], fpos[i,1]
                 x2, y2 = lpos[i,0], lpos[i,1]
                 plt.plot([x1,x2], [y1,y2], '--', lw=1, c='0.5')
-        
-        # add labels and color bar
-        norm = mpl.colors.Normalize(vmin=0.8, vmax=1.6)
-        cb = plt.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap))
-        cb.set_label('m/s')
-        plt.xlabel('position x')
-        plt.ylabel('position y')
-        filt = ', filtered data' if is_filtered else ', raw data'
-        plt.title('subject ' + str(self.subject_id) + ' trial ' + str(self.trial_id) + '\n v0 = ' + str(self.v0) + filt)
+
         plt.show()
     
-    def plot_speeds(self, distance=True, is_rotated=True, is_filtered=True, order=None, cutoff=None):
-        # get data
-        fspd = self.get_speeds('f', is_rotated, is_filtered, order, cutoff)
-        lspd = self.get_speeds('l', is_rotated, is_filtered, order, cutoff)
-        lpos = self.get_positions('l', is_rotated, is_filtered, order, cutoff)
-        fpos = self.get_positions('f', is_rotated, is_filtered, order, cutoff)
-        t = self.tstamps
+    def plot_speeds(self, distance=True, **kwargs):
+        '''
+            Plot speed of follower and leader by time
+            args:
+                distance: Boolean. Whether draw distance indicator
+                          (distance/10) on top of leader speed.
+        '''
+        # load kwargs
+        is_filtered = True if 'is_filtered' not in kwargs else kwargs['is_filtered']
         
+        # get data
+        fspd = self.get_speeds('f', **kwargs)
+        lspd = self.get_speeds('l', **kwargs)
+        lpos = self.get_positions('l', **kwargs)
+        fpos = self.get_positions('f', **kwargs)
+        if is_filtered:
+            t = np.linspace(0, self.tstamps[-1], num=len(self.tstamps))
+        else:
+            t = self.tstamps
+     
         # build figure
         fig = plt.figure()
         ax = plt.axes(xlim=(0, 12), ylim=(-0.5, 2))
+        plt.xlabel('time')
+        plt.ylabel('speed (m/s)')
+        filt = ', filtered data' if is_filtered else ', raw data'
+        plt.title('subject ' + str(self.subject_id) + ' trial ' + str(self.trial_id) + '\n v0 = ' + str(self.v0) + filt)
         
         # plot distance
         if distance:
@@ -169,23 +201,59 @@ class Trial:
                 
         # plot leader and follower spd
         line1 = ax.plot(t[self.f1+1:], lspd[self.f1+1:])
-        line2 = ax.plot(t, fspd)
-        plt.xlabel('time')
-        plt.ylabel('speed (m/s)')        
-        plt.legend((line1[0], line2[0], line3[0]), (str(self.leader), 'subject', 'distance/10'))
-        filt = ', filtered data' if is_filtered else ', raw data'
-        plt.title('subject ' + str(self.subject_id) + ' trial ' + str(self.trial_id) + '\n v0 = ' + str(self.v0) + filt)        
+        line2 = ax.plot(t, fspd)             
+        plt.legend((line1[0], line2[0]), (str(self.leader), 'subject'))
+        if distance:
+            plt.legend((line1[0], line2[0], line3[0]), (str(self.leader), 'subject', 'distance/10'))
+                
         plt.show()
     
-    def play_trial(self, velocities = True, interval=11, save=False, is_rotated=True, is_filtered=True, order=None, cutoff=None):
-        lpos = self.get_positions('l', is_rotated, is_filtered, order, cutoff)
+    def plot_accelerations(self, distance=True, **kwargs):
+        '''
+            Show the signed acceleration of the follower along the y axis.
+            of follower and leader using scatter plot.
+            args:
+                accelerations: Boolean. Whether draw acceleration vectors.
+                links: Boolean. Whether draw links between the positions of 
+                       follower and leader at the same moment for a sense 
+                       of concurrency.
+        '''
+        
+        # load kwargs
+        is_filtered = True if 'is_filtered' not in kwargs else kwargs['is_filtered']
+        
+        # get data 
+        facc = self.get_accelerations('f')[:,1]
+        if is_filtered:
+            t = np.linspace(0, self.tstamps[-1], num=len(self.tstamps))
+        else:
+            t = self.tstamps
+        
+        # build figure
+        fig = plt.figure()
+        ax = plt.axes(xlim=(0, 12), ylim=(-0.5, 2))
+        plt.xlabel('time')
+        plt.ylabel('acceleration (m^2/s)')
+        filt = ', filtered data' if is_filtered else ', raw data'
+        plt.title('subject ' + str(self.subject_id) + ' trial ' + str(self.trial_id) + '\n v0 = ' + str(self.v0) + filt)
+        
+        # plot accelerations
+        ax.plot(t, facc)
+        
+    def play_trial(self, velocities = True, interval=11, save=False, **kwargs):
+        # load kwargs
+        is_rotated = True if 'is_rotated' not in kwargs else kwargs['is_rotated']
+        is_filtered = True if 'is_filtered' not in kwargs else kwargs['is_filtered']
+        
+        # get data
+        lpos = self.get_positions('l', **kwargs)
         lpos[:self.f1] = [99,99,0] # make leader out of the ploting range before its onset        
-        fpos = self.get_positions('f', is_rotated, is_filtered, order, cutoff)
-        lspd = self.get_speeds('l', is_rotated, is_filtered, order, cutoff)
-        fspd = self.get_speeds('f', is_rotated, is_filtered, order, cutoff)
+        fpos = self.get_positions('f', **kwargs)
+        lspd = self.get_speeds('l', **kwargs)
+        fspd = self.get_speeds('f', **kwargs)
         pos_x = np.stack((lpos[:,0], fpos[:,0]), axis=1)
         pos_y = np.stack((lpos[:,1], fpos[:,1]), axis=1)
-        fvel = self.get_velocities('f', is_rotated, is_filtered, order, cutoff)
+        fvel = self.get_velocities('f', **kwargs)
         
         # set up the figure, the axis, and the plot element we want to animate
         fig = plt.figure(figsize=(4,7))
