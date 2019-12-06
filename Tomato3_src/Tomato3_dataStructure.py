@@ -15,6 +15,7 @@ class Trial:
         self.d0 = d0
         self.v0 = v0
         self.tstamps = tstamps
+        self.length = len(self.tstamps)
         self.lpos = lpos # unfilered time series of leader position, 2-d np array, column0:x column1:y  
         self.fpos = fpos # unfilered time series of follower position, 2-d np array, column0:x column1:y  
         self.fori = fori # unfilered time series of follower orientation , 2-d np array, column0-2:yaw pitch row  
@@ -252,7 +253,7 @@ class Trial:
      
         # build figure
         fig = plt.figure()
-        ax = plt.axes(xlim=(0, 12), ylim=yrange)
+        ax = plt.axes(xlim=(0, 14), ylim=yrange)
         plt.xlabel('time')
         plt.ylabel(component + ' speed (m/s)')
         filt = ', filtered data' if filtered else ', raw data'
